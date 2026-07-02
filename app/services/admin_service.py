@@ -47,28 +47,74 @@ def deactivate_department(department_id: int, by_user: int):
     return True, "Department deactivated."
 
 
+def get_user_department_ids(user_id: int) -> list[int]:
+    """Get all department IDs assigned to a user."""
+    with get_cursor() as cur:
+        cur.execute(
+            "SELECT department_id FROM user_departments WHERE user_id = ?",
+            (user_id,)
+        )
+        rows = cur.fetchall()
+    return [int(r["department_id"]) for r in rows]
+
+
+def set_user_departments(user_id: int, department_ids: list[int], by_user: int):
+    """Replace all department assignments for a user."""
+    with get_cursor(commit=True) as cur:
+        cur.execute("DELETE FROM user_departments WHERE user_id = ?", (user_id,))
+        for dept_id in department_ids:
+            cur.execute(
+                "INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)",
+                (user_id, dept_id)
+            )
+        # Also update primary department_id on users table (first selected or None)
+        primary = department_ids[0] if department_ids else None
+        cur.execute("UPDATE users SET department_id = ? WHERE user_id = ?", (primary, user_id))
+        log_activity(cur, by_user, "USER_UPDATED", f"Updated departments for user #{user_id}")
+    return True, "Departments updated."
+
+
 def list_users(active_only: bool = True, department_id: int | None = None):
     query = """
         SELECT u.user_id, u.full_name, u.username, u.email, u.is_active,
                u.avatar_color, u.last_login, u.created_at,
-               r.role_name, d.department_name, d.department_id
+               r.role_name, u.department_id
         FROM users u
         JOIN roles r ON u.role_id = r.role_id
-        LEFT JOIN departments d ON u.department_id = d.department_id
         WHERE 1=1
     """
     params = []
     if active_only:
         query += " AND u.is_active = 1"
     if department_id:
-        query += " AND u.department_id = ?"
+        query += " AND u.user_id IN (SELECT user_id FROM user_departments WHERE department_id = ?)"
         params.append(department_id)
     query += " ORDER BY r.role_name ASC, u.full_name ASC"
 
     with get_cursor() as cur:
         cur.execute(query, params)
         rows = cur.fetchall()
-    return [dict(r) for r in rows]
+
+    users = []
+    for r in rows:
+        user = dict(r)
+        # Get all departments for this user
+        dept_ids = get_user_department_ids(int(r["user_id"]))
+        if dept_ids:
+            with get_cursor() as cur2:
+                placeholders = ",".join("?" * len(dept_ids))
+                cur2.execute(
+                    f"SELECT department_name FROM departments WHERE department_id IN ({placeholders})",
+                    dept_ids
+                )
+                dept_rows = cur2.fetchall()
+            user["department_names"] = [d["department_name"] for d in dept_rows]
+            user["department_name"] = ", ".join(user["department_names"])
+        else:
+            user["department_names"] = []
+            user["department_name"] = None
+        users.append(user)
+    return users
 
 
 def update_user(user_id: int, by_user: int, **fields):
