@@ -89,7 +89,53 @@ with tab_list:
                 if m["last_login"]:
                     st.caption(f"Last login: {m['last_login']}")
             with c2:
-                with st.popover("Manage", width='stretch'):
+                manage_key = f"manage_{m['user_id']}"
+                if manage_key not in st.session_state:
+                    st.session_state[manage_key] = False
+                if st.button("Manage", key=f"btn_{m['user_id']}", width='stretch'):
+                    st.session_state[manage_key] = not st.session_state[manage_key]
+
+            if st.session_state.get(f"manage_{m['user_id']}", False):
+            with st.container(border=True):
+                st.markdown(f"**Managing: {m['full_name']}**")
+                
+                current_dept_ids = get_user_department_ids(m["user_id"])
+                current_dept_names = [
+                    dept_id_to_name[i]
+                    for i in current_dept_ids
+                    if i in dept_id_to_name
+                ]
+
+                selected_depts = st.multiselect(
+                    "Departments",
+                    options=list(dept_name_to_id.keys()),
+                    default=current_dept_names,
+                    key=f"depts_{m['user_id']}",
+                )
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("Update Departments", key=f"upd_dept_{m['user_id']}", type="primary"):
+                        selected_ids = [dept_name_to_id[n] for n in selected_depts]
+                        set_user_departments(m["user_id"], selected_ids, user["user_id"])
+                        st.session_state[f"manage_{m['user_id']}"] = False
+                        st.success("Departments updated.")
+                        st.rerun()
+                with col_b:
+                    if m["is_active"]:
+                        is_last_president = (m["role_name"] == "President" and count_presidents() <= 1)
+                        if is_last_president:
+                            st.caption("⚠️ Cannot deactivate the last remaining President.")
+                        else:
+                            if st.button("🚫 Deactivate", key=f"deact_{m['user_id']}"):
+                                deactivate_user(m["user_id"], user["user_id"])
+                                st.success("Member deactivated.")
+                                st.rerun()
+                    else:
+                        if st.button("✅ Reactivate", key=f"react_{m['user_id']}"):
+                            reactivate_user(m["user_id"], user["user_id"])
+                            st.success("Member reactivated.")
+                            st.rerun()
 
                     # Multi-department selector
                     current_dept_ids = get_user_department_ids(m["user_id"])
